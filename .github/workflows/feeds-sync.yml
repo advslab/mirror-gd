@@ -1,0 +1,55 @@
+name: feeds sync
+
+# Every 15 minutes plus manual. Keeps a rolling 48-hour window of the
+# source's cyber rows (tag `data`): every 15-minute slot of the window the
+# store lacks is downloaded, reduced and cached as slot-YYYYMMDDHHMM.jsonl.gz;
+# then cyber-48h.jsonl.gz, its manifest cyber-48h.json and state.json go up
+# in that order, and the slots that left the window are deleted. A late or
+# skipped run is filled by the next one.
+#
+# Set the repository secret SOURCE_BASE (the source's base URL)
+# (Settings → Secrets and variables → Actions → Secrets); it is masked in every log.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      budget:
+        description: "minutes the downloads may take"
+        required: false
+        default: "10"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: feeds-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: refuse without the source secret
+        env:
+          SOURCE_BASE: ${{ secrets.SOURCE_BASE }}
+        run: |
+          if [ -z "$SOURCE_BASE" ]; then echo "::error::repository secret SOURCE_BASE is not set"; exit 1; fi
+      - name: sync
+        env:
+          SOURCE_BASE: ${{ secrets.SOURCE_BASE }}
+          BUDGET: ${{ inputs.budget || '10' }}
+          RELEASE_TAG: data
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SPACES_ENDPOINT: ${{ secrets.SPACES_ENDPOINT }}
+          SPACES_BUCKET: ${{ secrets.SPACES_BUCKET }}
+          SPACES_KEY: ${{ secrets.SPACES_KEY }}
+          SPACES_SECRET: ${{ secrets.SPACES_SECRET }}
+          SPACES_REGION: sgp1
+        run: |
+          chmod +x bin/feeds-sync
+          sha256sum bin/feeds-sync
+          bin/feeds-sync
